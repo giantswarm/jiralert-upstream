@@ -87,35 +87,16 @@ func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool) (bool, er
 	// Issue already exists.
 	if issue != nil {
 
-		// Alert has been resolved. Close issue.
-		if len(data.Alerts.Firing()) == 0 {
-			if r.conf.AutoResolve != nil {
-				level.Debug(r.logger).Log("msg", "no firing alert; resolving issue", "key", issue.Key, "label", issueGroupLabel)
-				retry, err := r.resolveIssue(issue.Key)
-				if err != nil {
-					return retry, err
-				}
-				return false, nil
-			}
-
-			level.Debug(r.logger).Log("msg", "no firing alert; summary checked, nothing else to do.", "key", issue.Key, "label", issueGroupLabel)
-			return false, nil
-		}
-
-		// Issue is set as won't fix. Discard.
-		if r.conf.WontFixResolution != "" && issue.Fields.Resolution != nil &&
-			issue.Fields.Resolution.Name == r.conf.WontFixResolution {
-			level.Info(r.logger).Log("msg", "issue was resolved as won't fix, not reopening", "key", issue.Key, "label", issueGroupLabel, "resolution", issue.Fields.Resolution.Name)
-			return false, nil
-		}
-
 		// Issue is closed and should be reopened
-		if issue.Fields.Resolution != nil || issue.Fields.Status.StatusCategory.Key == "done" {
+		if issue.Fields.Status.StatusCategory.Key == "done" && issue.Fields.Resolution.Name != r.conf.WontFixResolution {
 			level.Info(r.logger).Log("msg", "issue was recently resolved, reopening", "key", issue.Key, "label", issueGroupLabel)
+			level.Info(r.logger).Log("msg", "ABOUT TO REOPEN", "key", issue.Key, "resolution", fmt.Sprint(issue.Fields.Resolution.Name), "condition", r.conf.WontFixResolution)
 			retry, err := r.reopen(issue.Key)
 			if err != nil {
 				return retry, err
 			}
+			// Issue is not dynamically updated, so we need to modify the Resolution to avoid creating duplicates on a "won't fix" situation
+			issue.Fields.Resolution = nil
 		}
 
 		// Update summary if needed.
@@ -134,11 +115,34 @@ func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool) (bool, er
 			}
 		}
 
+		// Issue is set as won't fix. Discard.
+		if r.conf.WontFixResolution != "" && issue.Fields.Resolution != nil &&
+			issue.Fields.Resolution.Name == r.conf.WontFixResolution {
+			level.Info(r.logger).Log("msg", "issue was resolved as won't fix, not reopening", "key", issue.Key, "label", issueGroupLabel, "resolution", issue.Fields.Resolution.Name)
+			return false, nil
+		}
+
+		// Alert has been resolved. Close issue.
+		if len(data.Alerts.Firing()) == 0 {
+			if r.conf.AutoResolve != nil {
+				level.Debug(r.logger).Log("msg", "no firing alert; resolving issue", "key", issue.Key, "label", issueGroupLabel)
+				retry, err := r.resolveIssue(issue.Key)
+				if err != nil {
+					return retry, err
+				}
+				return false, nil
+			}
+
+			level.Debug(r.logger).Log("msg", "no firing alert; summary checked, nothing else to do.", "key", issue.Key, "label", issueGroupLabel)
+			return false, nil
+		}
+
 		// The set of JIRA status categories is fixed, this is a safe check to make.
-		if issue.Fields.Status.StatusCategory.Key != "done" {
+		if issue.Fields.Resolution == nil {
 			level.Debug(r.logger).Log("msg", "issue is unresolved, all is done", "key", issue.Key, "label", issueGroupLabel)
 			return false, nil
 		}
+
 	}
 
 	if len(data.Alerts.Firing()) == 0 {
