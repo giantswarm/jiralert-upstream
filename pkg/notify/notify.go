@@ -90,7 +90,6 @@ func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool) (bool, er
 		// Issue is closed and should be reopened
 		if issue.Fields.Status.StatusCategory.Key == "done" && issue.Fields.Resolution.Name != r.conf.WontFixResolution {
 			level.Info(r.logger).Log("msg", "issue was recently resolved, reopening", "key", issue.Key, "label", issueGroupLabel)
-			level.Info(r.logger).Log("msg", "ABOUT TO REOPEN", "key", issue.Key, "resolution", fmt.Sprint(issue.Fields.Resolution.Name), "condition", r.conf.WontFixResolution)
 			retry, err := r.reopen(issue.Key)
 			if err != nil {
 				return retry, err
