@@ -1,0 +1,55 @@
+
+
+version: 2.1
+orbs:
+  architect: giantswarm/architect@4.24.0
+
+workflows:
+  package-and-push-chart-on-tag:
+    jobs:
+      - architect/go-build:
+          name: go-build
+          binary: security-pack-helper
+          resource_class: large
+          filters:
+            tags:
+              only: /^v.*/
+
+      # - architect/push-to-docker:
+      #     context: "architect"
+      #     name: push-starboard-exporter-to-docker
+      #     image: "docker.io/giantswarm/starboard-exporter"
+      #     username_envar: "DOCKER_USERNAME"
+      #     password_envar: "DOCKER_PASSWORD"
+      #     requires:
+      #       - go-build
+      #     # Needed to trigger job also on git tag.
+      #     filters:
+      #       tags:
+      #         only: /^v.*/
+
+      - architect/push-to-docker:
+          context: "architect"
+          name: push-security-pack-helper-to-quay
+          image: "quay.io/giantswarm/jiralert"
+          username_envar: "QUAY_USERNAME"
+          password_envar: "QUAY_PASSWORD"
+          requires:
+            - go-build
+          # Needed to trigger job also on git tag.
+          filters:
+            tags:
+              only: /^fork-.*/
+
+      # - architect/push-to-docker:
+      #     context: "architect"
+      #     name: push-security-pack-helper-to-aliyun
+      #     image: "registry-intl.cn-shanghai.aliyuncs.com/giantswarm/security-pack-helper"
+      #     username_envar: "ALIYUN_USERNAME"
+      #     password_envar: "ALIYUN_PASSWORD"
+      #     requires:
+      #       - go-build
+      #     # Needed to trigger job also on git tag.
+      #     filters:
+      #       tags:
+      #         only: /^v.*/
