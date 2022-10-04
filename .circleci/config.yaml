@@ -9,15 +9,15 @@ workflows:
     jobs:
       - architect/go-build:
           name: go-build
-          binary: security-pack-helper
+          binary: jiralert
           resource_class: large
           filters:
             tags:
-              only: /^v.*/
+              only: /^fork-v.*/
 
       # - architect/push-to-docker:
       #     context: "architect"
-      #     name: push-starboard-exporter-to-docker
+      #     name: push-push-jiralert-to-docker
       #     image: "docker.io/giantswarm/starboard-exporter"
       #     username_envar: "DOCKER_USERNAME"
       #     password_envar: "DOCKER_PASSWORD"
@@ -30,7 +30,7 @@ workflows:
 
       - architect/push-to-docker:
           context: "architect"
-          name: push-security-pack-helper-to-quay
+          name: push-jiralert-to-quay
           image: "quay.io/giantswarm/jiralert"
           username_envar: "QUAY_USERNAME"
           password_envar: "QUAY_PASSWORD"
@@ -39,11 +39,11 @@ workflows:
           # Needed to trigger job also on git tag.
           filters:
             tags:
-              only: /^fork-.*/
+              only: /^fork-v.*/
 
       # - architect/push-to-docker:
       #     context: "architect"
-      #     name: push-security-pack-helper-to-aliyun
+      #     name: push-jiralert-to-aliyun
       #     image: "registry-intl.cn-shanghai.aliyuncs.com/giantswarm/security-pack-helper"
       #     username_envar: "ALIYUN_USERNAME"
       #     password_envar: "ALIYUN_PASSWORD"
