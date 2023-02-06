@@ -22,6 +22,7 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/pkg/errors"
+	"github.com/prometheus-community/jiralert/pkg/alertmanager"
 )
 
 type Template struct {
@@ -45,6 +46,40 @@ var funcs = template.FuncMap{
 	},
 	"stringSlice": func(s ...string) []string {
 		return s
+	},
+	"removeDuplicates": func(base, key string, arr []alertmanager.Alert) []alertmanager.Alert {
+		uniq := make(map[string]bool)
+		var result []alertmanager.Alert
+
+		for _, val := range arr {
+			var foundBase, foundKey string
+			for _, pair := range val.Labels.SortedPairs() {
+				if pair.Name == base {
+					foundBase = pair.Value
+				}
+				if pair.Name == key {
+					foundKey = pair.Value
+				}
+			}
+			if foundBase != "" && foundKey != "" {
+				if !uniq[foundBase+foundKey] {
+					uniq[foundBase+foundKey] = true
+					result = append(result, val)
+				}
+			}
+		}
+		return result
+	},
+	"groupAlerts": func(label string, arr []alertmanager.Alert) map[string][]alertmanager.Alert {
+		groups := make(map[string][]alertmanager.Alert)
+		for _, val := range arr {
+			for _, pair := range val.Labels.SortedPairs() {
+				if pair.Name == label {
+					groups[pair.Value] = append(groups[pair.Value], val)
+				}
+			}
+		}
+		return groups
 	},
 }
 
