@@ -15,13 +15,15 @@ package template
 
 import (
 	"bytes"
+	"os"
 	"regexp"
 	"strings"
 	"text/template"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
+	"golang.org/x/text/cases"
 )
 
 type Template struct {
@@ -32,7 +34,7 @@ type Template struct {
 var funcs = template.FuncMap{
 	"toUpper": strings.ToUpper,
 	"toLower": strings.ToLower,
-	"title":   strings.Title,
+	"title":   cases.Title,
 	// join is equal to strings.Join but inverts the argument order
 	// for easier pipelining in templates.
 	"join": func(sep string, s []string) string {
@@ -45,6 +47,9 @@ var funcs = template.FuncMap{
 	},
 	"stringSlice": func(s ...string) []string {
 		return s
+	},
+	"getEnv": func(name string) string {
+		return os.Getenv(name)
 	},
 }
 

@@ -10,20 +10,21 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package notify
 
 import (
 	"bytes"
 	"crypto/sha512"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"reflect"
 	"strings"
 	"time"
 
 	"github.com/andygrunwald/go-jira"
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus-community/jiralert/pkg/alertmanager"
 	"github.com/prometheus-community/jiralert/pkg/config"
@@ -59,7 +60,7 @@ func NewReceiver(logger log.Logger, c *config.ReceiverConfig, t *template.Templa
 }
 
 // Notify manages JIRA issues based on alertmanager webhook notify message.
-func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool) (bool, error) {
+func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool, updateSummary bool, updateDescription bool, reopenTickets bool, maxDescriptionLength int) (bool, error) {
 	project, err := r.tmpl.Execute(r.conf.Project, data)
 	if err != nil {
 		return false, errors.Wrap(err, "generate project from template")
@@ -84,19 +85,30 @@ func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool) (bool, er
 		return false, errors.Wrap(err, "render issue description")
 	}
 
+	if len(issueDesc) > maxDescriptionLength {
+		level.Warn(r.logger).Log("msg", "truncating description", "original", len(issueDesc), "limit", maxDescriptionLength)
+		issueDesc = issueDesc[:maxDescriptionLength]
+	}
+
 	if issue != nil {
+
 		// Update summary if needed.
-		if issue.Fields.Summary != issueSummary {
-			retry, err := r.updateSummary(issue.Key, issueSummary)
-			if err != nil {
-				return retry, err
+		if updateSummary {
+			if issue.Fields.Summary != issueSummary {
+				level.Debug(r.logger).Log("updateSummaryDisabled executing")
+				retry, err := r.updateSummary(issue.Key, issueSummary)
+				if err != nil {
+					return retry, err
+				}
 			}
 		}
 
-		if issue.Fields.Description != issueDesc {
-			retry, err := r.updateDescription(issue.Key, issueDesc)
-			if err != nil {
-				return retry, err
+		if updateDescription {
+			if issue.Fields.Description != issueDesc {
+				retry, err := r.updateDescription(issue.Key, issueDesc)
+				if err != nil {
+					return retry, err
+				}
 			}
 		}
 
@@ -120,14 +132,19 @@ func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool) (bool, er
 			return false, nil
 		}
 
-		if r.conf.WontFixResolution != "" && issue.Fields.Resolution != nil &&
-			issue.Fields.Resolution.Name == r.conf.WontFixResolution {
-			level.Info(r.logger).Log("msg", "issue was resolved as won't fix, not reopening", "key", issue.Key, "label", issueGroupLabel, "resolution", issue.Fields.Resolution.Name)
-			return false, nil
+		if reopenTickets {
+			if r.conf.WontFixResolution != "" && issue.Fields.Resolution != nil &&
+				issue.Fields.Resolution.Name == r.conf.WontFixResolution {
+				level.Info(r.logger).Log("msg", "issue was resolved as won't fix, not reopening", "key", issue.Key, "label", issueGroupLabel, "resolution", issue.Fields.Resolution.Name)
+				return false, nil
+			}
+
+			level.Info(r.logger).Log("msg", "issue was recently resolved, reopening", "key", issue.Key, "label", issueGroupLabel)
+			return r.reopen(issue.Key)
 		}
 
-		level.Info(r.logger).Log("msg", "issue was recently resolved, reopening", "key", issue.Key, "label", issueGroupLabel)
-		return r.reopen(issue.Key)
+		level.Debug(r.logger).Log("Did not update anything")
+		return false, nil
 	}
 
 	if len(data.Alerts.Firing()) == 0 {
@@ -142,13 +159,15 @@ func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool) (bool, er
 		return false, errors.Wrap(err, "render issue type")
 	}
 
+	staticLabels := r.conf.StaticLabels
+
 	issue = &jira.Issue{
 		Fields: &jira.IssueFields{
 			Project:     jira.Project{Key: project},
 			Type:        jira.IssueType{Name: issueType},
 			Description: issueDesc,
 			Summary:     issueSummary,
-			Labels:      []string{issueGroupLabel},
+			Labels:      append(staticLabels, issueGroupLabel),
 			Unknowns:    tcontainer.NewMarshalMap(),
 		},
 	}
@@ -175,7 +194,7 @@ func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool) (bool, er
 
 	if r.conf.AddGroupLabels {
 		for k, v := range data.GroupLabels {
-			issue.Fields.Labels = append(issue.Fields.Labels, fmt.Sprintf("%s=%q", k, v))
+			issue.Fields.Labels = append(issue.Fields.Labels, fmt.Sprintf("%s=%.200q", k, v))
 		}
 	}
 
@@ -375,10 +394,11 @@ func handleJiraErrResponse(api string, resp *jira.Response, err error, logger lo
 	}
 
 	if resp != nil && resp.StatusCode/100 != 2 {
-		retry := resp.StatusCode == 500 || resp.StatusCode == 503
-		body, _ := ioutil.ReadAll(resp.Body)
-		// go-jira error message is not particularly helpful, replace it
-		return retry, errors.Errorf("JIRA request %s returned status %s, body %q", resp.Request.URL, resp.Status, string(body))
+		retry := resp.StatusCode == 500 || resp.StatusCode == 503 || resp.StatusCode == 429
+		// Sometimes go-jira consumes the body (e.g. in `Search`) and includes it in the error message;
+		// sometimes (e.g. in `Create`) it doesn't. Include both the error and the body, just in case.
+		body, _ := io.ReadAll(resp.Body)
+		return retry, errors.Errorf("JIRA request %s returned status %s, error %q, body %q", resp.Request.URL, resp.Status, err, body)
 	}
 	return false, errors.Wrapf(err, "JIRA request %s failed", api)
 }
@@ -405,6 +425,6 @@ func (r *Receiver) doTransition(issueKey string, transitionState string) (bool, 
 			return false, nil
 		}
 	}
-	return false, errors.Errorf("JIRA state %q does not exist or no transition possible for %s", r.conf.ReopenState, issueKey)
+	return false, errors.Errorf("JIRA state %q does not exist or no transition possible for %s", transitionState, issueKey)
 
 }

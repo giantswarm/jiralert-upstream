@@ -5,6 +5,8 @@ defaults:
   api_url: https://jiralert.atlassian.net
   user: jiralert
   password: 'JIRAlert'
+  # Alternatively to user and password use a Personal Access Token
+  # personal_access_token: "Your Personal Access Token". See https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html
 
   # The type of JIRA issue to create. Required.
   issue_type: Bug
@@ -21,6 +23,8 @@ defaults:
   # Amount of time after being closed that an issue should be reopened, after which, a new issue is created.
   # Optional (default: always reopen)
   reopen_duration: 0h
+  # Static label that will be added to the JIRA ticket alongisde the JIRALERT{...} or ALERT{...} label
+  static_labels: ["custom"]
 
 # Receiver definitions. At least one must be defined.
 receivers:
@@ -30,6 +34,8 @@ receivers:
     project: AB
     # Copy all Prometheus labels into separate JIRA labels. Optional (default: false).
     add_group_labels: false
+    # Will be merged with the static_labels from the default map
+    static_labels: ["anotherLabel"]
 
   - name: 'jira-xy'
     project: XY
